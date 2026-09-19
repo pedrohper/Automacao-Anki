@@ -361,13 +361,13 @@ class AnkiAutomationGUI:
         self.combo_esamc_axis = ttk.Combobox(
             self.tab_esamc,
             values=[
-                "ESAMC: Eixo TI & Programação (CC / SI / Software)",
-                "ESAMC: Eixo Gestão & Negócios (ADM / ERP / BI)"
+                "Eixo TI & Programação (CC / SI / Software)",
+                "Eixo Gestão & Negócios (ADM / ERP / BI)"
             ],
             font=("Segoe UI", 9),
             state="readonly"
         )
-        self.combo_esamc_axis.set("ESAMC: Eixo TI & Programação (CC / SI / Software)")
+        self.combo_esamc_axis.set("Eixo TI & Programação (CC / SI / Software)")
         self.combo_esamc_axis.pack(fill="x", pady=(0, 6))
 
         row_files = tk.Frame(self.tab_esamc, bg=self.card_bg)
@@ -618,40 +618,60 @@ class AnkiAutomationGUI:
                 label_widget.config(text=f"📎 Anexado: {filename}", fg="#a6e3a1")
             self.log(f"📁 Arquivo anexado [{section_key.upper()}]: {file_path}")
 
-    # Enviar Baralho Predefinido com 1 clique (SENAI, ESAMC, Cargill)
     def send_preset_to_anki(self, category: str):
-        if category == "SENAI":
-            cards = get_all_senai_cards_flat()
-            deck_name = "SENAI::Aprendizagem Administrativa Completo"
-        elif category == "ESAMC":
-            cards = ESAMC_CARDS
-            deck_name = "ESAMC::Sistemas de Informação"
-        elif category == "Cargill":
-            cards = CARGILL_CARDS
-            deck_name = "Cargill::Geral e EHS"
-        else:
-            return
-
         if not check_connection():
             messagebox.showwarning("Anki Desconectado", "Abra o Anki Desktop para enviar diretamente ou use a opção de baixar o arquivo .apkg!")
             return
 
         def worker():
-            self.log(f"\n🚀 Enviando baralho completo de revisão '{deck_name}' ({len(cards)} cards) para o Anki...")
-            created = 0
-            for c in cards:
-                try:
-                    add_note(
-                        front_content=c["front"],
-                        back_content=c["back"],
-                        deck_name=deck_name,
-                        tags=[category, "Revisão", "Automação"]
-                    )
-                    record_card(category, c["front"], c["back"])
-                    created += 1
-                except Exception as e:
-                    self.log(f" ❌ Erro ao enviar card: {e}")
-            self.log(f"✅ Sucesso! {created} cards enviados para o baralho '{deck_name}' no Anki!")
+            if category == "SENAI":
+                cards = get_all_senai_cards_flat()
+                deck_name = "SENAI::Aprendizagem Administrativa Completo"
+                self.log(f"\n🚀 Enviando baralho completo '{deck_name}' ({len(cards)} cards) para o Anki...")
+                created = 0
+                for c in cards:
+                    try:
+                        add_note(front_content=c["front"], back_content=c["back"], deck_name=deck_name, tags=["SENAI", "Revisão"])
+                        record_card("SENAI", c["front"], c["back"])
+                        created += 1
+                    except Exception as e:
+                        self.log(f" ❌ Erro: {e}")
+                self.log(f"✅ {created} cards enviados para '{deck_name}'!")
+
+            elif category == "ESAMC":
+                from src.preset_data import ESAMC_TI_CARDS, ESAMC_ADM_CARDS
+                self.log("\n🚀 Enviando baralhos da ESAMC divididos por Eixos para o Anki...")
+                c_ti, c_adm = 0, 0
+                for c in ESAMC_TI_CARDS:
+                    try:
+                        add_note(front_content=c["front"], back_content=c["back"], deck_name="Eixo TI & Programação", tags=["ESAMC", "TI"])
+                        record_card("ESAMC_TI", c["front"], c["back"])
+                        c_ti += 1
+                    except Exception as e:
+                        self.log(f" ❌ Erro: {e}")
+                for c in ESAMC_ADM_CARDS:
+                    try:
+                        add_note(front_content=c["front"], back_content=c["back"], deck_name="Eixo Gestão & Negócios", tags=["ESAMC", "ADM"])
+                        record_card("ESAMC_ADM", c["front"], c["back"])
+                        c_adm += 1
+                    except Exception as e:
+                        self.log(f" ❌ Erro: {e}")
+                self.log(f"✅ Concluído! {c_ti} cards enviados para 'Eixo TI & Programação' e {c_adm} para 'Eixo Gestão & Negócios'!")
+
+            elif category == "Cargill":
+                cards = CARGILL_CARDS
+                deck_name = "Cargill::Geral e EHS"
+                self.log(f"\n🚀 Enviando baralho '{deck_name}' ({len(cards)} cards)...")
+                created = 0
+                for c in cards:
+                    try:
+                        add_note(front_content=c["front"], back_content=c["back"], deck_name=deck_name, tags=["Cargill", "EHS"])
+                        record_card("Cargill", c["front"], c["back"])
+                        created += 1
+                    except Exception as e:
+                        self.log(f" ❌ Erro: {e}")
+                self.log(f"✅ {created} cards enviados para '{deck_name}'!")
+
             self.root.after(0, self.load_history_data)
 
         threading.Thread(target=worker, daemon=True).start()
@@ -703,7 +723,10 @@ class AnkiAutomationGUI:
             messagebox.showwarning("Aviso", "Anexe um arquivo (PDF/TXT) ou cole o resumo/texto da aula!")
             return
 
-        deck_name = f"{category}::{subject}"
+        if category == "ESAMC" or subject.startswith("Eixo "):
+            deck_name = subject
+        else:
+            deck_name = f"{category}::{subject}"
 
         def worker():
             try:
