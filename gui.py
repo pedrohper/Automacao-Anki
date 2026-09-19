@@ -95,7 +95,7 @@ class AnkiAutomationGUI:
 
         # Seção 3: SENAI
         self.tab_senai = tk.Frame(self.notebook, bg=self.card_bg, padx=12, pady=10)
-        self.notebook.add(self.tab_senai, text="🏭 SENAI (14 Matérias)")
+        self.notebook.add(self.tab_senai, text="🏭 SENAI")
         self.setup_senai_tab()
 
         # Seção 4: ESAMC
@@ -277,7 +277,7 @@ class AnkiAutomationGUI:
         row1 = tk.Frame(self.tab_senai, bg=self.card_bg)
         row1.pack(fill="x", pady=(0, 4))
 
-        lbl_subj = tk.Label(row1, text="Disciplina SENAI (14 Matérias):", font=("Segoe UI", 9, "bold"), bg=self.card_bg, fg=self.text_color)
+        lbl_subj = tk.Label(row1, text="Disciplina SENAI:", font=("Segoe UI", 9, "bold"), bg=self.card_bg, fg=self.text_color)
         lbl_subj.pack(anchor="w")
 
         self.combo_senai = ttk.Combobox(self.tab_senai, values=SENAI_DISCIPLINES, font=("Segoe UI", 9), state="normal")
