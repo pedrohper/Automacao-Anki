@@ -1,0 +1,37 @@
+# Ambientes Virtuais Python
+.venv/
+venv/
+env/
+ENV/
+
+# Variáveis de Ambiente e Segredos
+.env
+*.pem
+*.key
+
+# Arquivos de Banco de Dados e Dados Locais
+*.db
+*.sqlite
+*.sqlite3
+data/*.db
+data/*.sqlite
+
+# Mídias e Baralhos Exportados
+*.apkg
+data/*.apkg
+data/*.mp3
+
+# Compilados e Caches do Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Configurações de IDEs e Editores
+.vscode/
+.idea/
+.project
+.settings/
+
+# Arquivos do Sistema Operacional
+.DS_Store
+Thumbs.db
