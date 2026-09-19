@@ -54,9 +54,9 @@ CARGILL_CARDS: List[Dict[str, str]] = [
 ]
 
 # ==========================================
-# 2. FLASHCARDS DA ESAMC (SISTEMAS EM ADM)
+# 2. FLASHCARDS DA ESAMC (2 EIXOS: TI/CC E GESTÃO/ADM)
 # ==========================================
-ESAMC_CARDS: List[Dict[str, str]] = [
+ESAMC_ADM_CARDS: List[Dict[str, str]] = [
     {
         "front": "O que é um sistema <b>ERP (Enterprise Resource Planning)</b> na gestão empresarial?",
         "back": "Um software integrado que unifica todas as áreas da empresa (Financeiro, Vendas, Estoque, RH, Produção) em uma <b>única base de dados centralizada</b> (ex: SAP, TOTVS)."
@@ -74,22 +74,35 @@ ESAMC_CARDS: List[Dict[str, str]] = [
         "back": "Tecnologias e processos de coleta, integração e análise de dados operacionais para gerar <b>dashboards e insights estratégicos</b> de negócios."
     },
     {
-        "front": "O que é um <b>Banco de Dados Relacional (RDBMS)</b> e qual a função da chave primária (PK)?",
-        "back": "É um banco que organiza dados em tabelas relacionadas. A <b>Chave Primária (Primary Key)</b> identifica de forma <b>única e exclusiva</b> cada registro na tabela."
-    },
-    {
         "front": "O que é o protocolo de <b>Governança de TI (ex: COBIT / ITIL)</b>?",
         "back": "Conjunto de diretrizes e boas práticas para alinhar os investimentos e serviços de Tecnologia da Informação aos <b>objetivos estratégicos do negócio</b>."
-    },
-    {
-        "front": "Qual é o papel da <b>Segurança da Informação</b> baseada no triângulo <b>CID (Confidencialidade, Integridade, Disponibilidade)</b>?",
-        "back": "• <b>Confidencialidade</b>: Dados visíveis apenas a pessoas autorizadas.<br>• <b>Integridade</b>: Dados precisos sem alteração indevida.<br>• <b>Disponibilidade</b>: Sistemas acessíveis quando necessários."
-    },
-    {
-        "front": "O que significa a integração por <b>API (Application Programming Interface)</b> nos sistemas modernos?",
-        "back": "Conjunto de rotinas e padrões de programação que permite que <b>softwares diferentes troquem dados automaticamente</b> de forma segura."
     }
 ]
+
+ESAMC_TI_CARDS: List[Dict[str, str]] = [
+    {
+        "front": "O que é uma <b>Estrutura de Dados (ex: Lista, Fila, Pilha)</b> na Ciência da Computação?",
+        "back": "Forma organizada de armazenar e gerenciar dados na memória do computador para uso eficiente por algoritmos."
+    },
+    {
+        "front": "Qual a diferença entre uma <b>Fila (Queue/FIFO)</b> e uma <b>Pilha (Stack/LIFO)</b> em programação?",
+        "back": "• <b>Fila (FIFO)</b>: O primeiro elemento a entrar é o primeiro a sair.<br>• <b>Pilha (LIFO)</b>: O último elemento a entrar é o primeiro a sair."
+    },
+    {
+        "front": "O que é um <b>Banco de Dados Relacional (RDBMS)</b> e qual a função da chave primária (PK)?",
+        "back": "Banco que organiza dados em tabelas relacionadas. A <b>Chave Primária (Primary Key)</b> identifica de forma <b>única e exclusiva</b> cada registro."
+    },
+    {
+        "front": "O que significa a integração por <b>API (Application Programming Interface)</b> no desenvolvimento de software?",
+        "back": "Padrão de comunicação de software que permite que <b>sistemas diferentes troquem dados automaticamente</b> (ex: REST / JSON)."
+    },
+    {
+        "front": "O que é a notação <b>Big-O</b> na análise de algoritmos?",
+        "back": "Métrica usada para medir o <b>desempenho e escalabilidade</b> de um algoritmo conforme o volume de dados cresce."
+    }
+]
+
+ESAMC_CARDS: List[Dict[str, str]] = ESAMC_ADM_CARDS + ESAMC_TI_CARDS
 
 # ==========================================
 # 3. FLASHCARDS DO SENAI (14 DISCIPLINAS OFICIAIS)

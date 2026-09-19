@@ -355,8 +355,20 @@ class AnkiAutomationGUI:
         )
         btn_exp_esamc.pack(side="right")
 
-        lbl_t = tk.Label(self.tab_esamc, text="Matéria: Sistemas de Informação em Administração / ERP", font=("Segoe UI", 9, "bold"), bg=self.card_bg, fg=self.accent_color)
-        lbl_t.pack(anchor="w", pady=(0, 4))
+        lbl_t = tk.Label(self.tab_esamc, text="Eixo da Faculdade (ESAMC):", font=("Segoe UI", 9, "bold"), bg=self.card_bg, fg=self.accent_color)
+        lbl_t.pack(anchor="w", pady=(0, 2))
+
+        self.combo_esamc_axis = ttk.Combobox(
+            self.tab_esamc,
+            values=[
+                "ESAMC: Eixo TI & Programação (CC / SI / Software)",
+                "ESAMC: Eixo Gestão & Negócios (ADM / ERP / BI)"
+            ],
+            font=("Segoe UI", 9),
+            state="readonly"
+        )
+        self.combo_esamc_axis.set("ESAMC: Eixo TI & Programação (CC / SI / Software)")
+        self.combo_esamc_axis.pack(fill="x", pady=(0, 6))
 
         row_files = tk.Frame(self.tab_esamc, bg=self.card_bg)
         row_files.pack(fill="x", pady=(0, 4))
@@ -379,7 +391,7 @@ class AnkiAutomationGUI:
         lbl_text = tk.Label(self.tab_esamc, text="Cole o resumo ou notas da aula ESAMC:", font=("Segoe UI", 9, "bold"), bg=self.card_bg, fg=self.text_color)
         lbl_text.pack(anchor="w", pady=(4, 2))
 
-        self.txt_esamc = scrolledtext.ScrolledText(self.tab_esamc, font=("Consolas", 9), bg="#181825", fg="#cdd6f4", height=5, bd=1, relief="solid")
+        self.txt_esamc = scrolledtext.ScrolledText(self.tab_esamc, font=("Consolas", 9), bg="#181825", fg="#cdd6f4", height=4, bd=1, relief="solid")
         self.txt_esamc.pack(fill="x", pady=(0, 6))
 
         btn_gen_esamc = tk.Button(
@@ -390,7 +402,7 @@ class AnkiAutomationGUI:
             fg=self.btn_fg,
             bd=0,
             cursor="hand2",
-            command=lambda: self.on_click_generate_custom("ESAMC", "Sistemas de Informação em ADM", self.txt_esamc, "esamc")
+            command=lambda: self.on_click_generate_custom("ESAMC", self.combo_esamc_axis.get(), self.txt_esamc, "esamc")
         )
         btn_gen_esamc.pack(fill="x", ipady=5)
 

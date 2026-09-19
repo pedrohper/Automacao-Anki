@@ -12,7 +12,7 @@ import sys
 # Adicionar raiz do projeto ao path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.preset_data import CARGILL_CARDS, ESAMC_CARDS, get_all_senai_cards_flat, SENAI_SUBJECTS_CARDS
+from src.preset_data import CARGILL_CARDS, ESAMC_CARDS, ESAMC_TI_CARDS, ESAMC_ADM_CARDS, get_all_senai_cards_flat
 from src.apkg_service import export_cards_to_apkg
 
 def generate_all():
@@ -24,10 +24,10 @@ def generate_all():
     export_cards_to_apkg("Cargill::Geral & EHS", CARGILL_CARDS, output_path=cargill_apkg)
     print(f"[OK] Baralho da Cargill gerado: {cargill_apkg} ({len(CARGILL_CARDS)} cards)")
 
-    # 2. ESAMC
+    # 2. ESAMC (Organizado em 2 Eixos)
     esamc_apkg = os.path.join(data_dir, "ESAMC_Sistemas_Informacao.apkg")
-    export_cards_to_apkg("ESAMC::Sistemas de Informação", ESAMC_CARDS, output_path=esamc_apkg)
-    print(f"[OK] Baralho da ESAMC gerado: {esamc_apkg} ({len(ESAMC_CARDS)} cards)")
+    export_cards_to_apkg("ESAMC::TI e Gestão", ESAMC_CARDS, output_path=esamc_apkg)
+    print(f"[OK] Baralho da ESAMC gerado: {esamc_apkg} ({len(ESAMC_CARDS)} cards - Eixo TI: {len(ESAMC_TI_CARDS)}, Eixo ADM: {len(ESAMC_ADM_CARDS)})")
 
     # 3. SENAI Completo
     senai_flat = get_all_senai_cards_flat()

@@ -29,8 +29,9 @@ DEFAULT_SUBJECTS = [
     "SENAI: Práticas Inovadoras",
     "SENAI: Fundamentos da Comunicação e Informação",
     "SENAI: Relações Socioprofissionais, Cidadania e Ética",
-    # ESAMC
-    "ESAMC: Sistemas de Informação em Administração (ERP / TI)",
+    # ESAMC (2 Eixos)
+    "ESAMC: Eixo TI & Programação (CC / SI / Software)",
+    "ESAMC: Eixo Gestão & Negócios (ADM / ERP / BI)",
     # Cargill
     "Cargill: Visão Geral, Valores & Operações",
     "Cargill: EHS & Segurança do Trabalho (Life Saving Rules)",
@@ -84,12 +85,15 @@ def generate_college_flashcards(subject: str, content: str, num_cards: int = 10)
     context_instruction = ""
     subj_lower = subject.lower()
 
-    if "esamc" in subj_lower or "sistemas de informação" in subj_lower:
+    if "ti" in subj_lower or "programação" in subj_lower or "cc" in subj_lower or "software" in subj_lower:
         context_instruction = (
-            "\n⚠️ REGRA CRÍTICA PARA DISCIPLINA ESAMC (ADMINISTRAÇÃO DE EMPRESAS):\n"
-            "Esta disciplina é de GESTÃO DE SISTEMAS DE INFORMAÇÃO EM ADM (Administração de Empresas).\n"
-            "Foque EXCLUSIVAMENTE em: ERP (SAP, TOTVS), CRM, SCM, BI (Dashboards/Analytics), Governança de TI (COBIT/ITIL), Segurança da Informação Corporativa, Alinhamento de TI com Estratégia de Negócios e Processos Organizacionais.\n"
-            "NÃO GERE de forma alguma conteúdos de desenvolvimento/engenharia de software pura, tais como: sintaxe de linguagem (JavaScript, Node.js, Python, C++), frameworks web (React, NestJS, Virtual DOM), estruturas de dados de código (Listas Encadeadas, Nós, Ponteiros, Big-O) ou tratamento de exceções de código.\n"
+            "\n⚠️ REGRA PARA EIXO TI & PROGRAMAÇÃO (ESAMC / CC / SI):\n"
+            "Foque em Ciência da Computação, Engenharia de Software, Algoritmos, Estrutura de Dados, Linguagens de Programação (Python, JS, C++), Banco de Dados e Desenvolvimento.\n"
+        )
+    elif "gestão" in subj_lower or "negócios" in subj_lower or "adm" in subj_lower:
+        context_instruction = (
+            "\n⚠️ REGRA PARA EIXO GESTÃO & NEGÓCIOS (ESAMC / ADM):\n"
+            "Foque em Administração de Empresas, ERP (SAP/TOTVS), CRM, SCM, BI (Dashboards/Analytics), Governança de TI (COBIT/ITIL), Processos Organizacionais e Finanças.\n"
         )
     elif "senai" in subj_lower:
         context_instruction = (
