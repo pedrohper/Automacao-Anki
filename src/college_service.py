@@ -81,13 +81,34 @@ def generate_college_flashcards(subject: str, content: str, num_cards: int = 10)
     max_chars = 12000
     truncated_content = content[:max_chars] if len(content) > max_chars else content
 
+    context_instruction = ""
+    subj_lower = subject.lower()
+
+    if "esamc" in subj_lower or "sistemas de informação" in subj_lower:
+        context_instruction = (
+            "\n⚠️ REGRA CRÍTICA PARA DISCIPLINA ESAMC (ADMINISTRAÇÃO DE EMPRESAS):\n"
+            "Esta disciplina é de GESTÃO DE SISTEMAS DE INFORMAÇÃO EM ADM (Administração de Empresas).\n"
+            "Foque EXCLUSIVAMENTE em: ERP (SAP, TOTVS), CRM, SCM, BI (Dashboards/Analytics), Governança de TI (COBIT/ITIL), Segurança da Informação Corporativa, Alinhamento de TI com Estratégia de Negócios e Processos Organizacionais.\n"
+            "NÃO GERE de forma alguma conteúdos de desenvolvimento/engenharia de software pura, tais como: sintaxe de linguagem (JavaScript, Node.js, Python, C++), frameworks web (React, NestJS, Virtual DOM), estruturas de dados de código (Listas Encadeadas, Nós, Ponteiros, Big-O) ou tratamento de exceções de código.\n"
+        )
+    elif "senai" in subj_lower:
+        context_instruction = (
+            "\n⚠️ REGRA PARA DISCIPLINA SENAI (APRENDIZAGEM ADMINISTRATIVA):\n"
+            "Foque em rotinas administrativas, processos de escritório/indústria, 5S, qualidade, logística, finanças e segurança do trabalho (NRs/EPIs).\n"
+        )
+    elif "cargill" in subj_lower:
+        context_instruction = (
+            "\n⚠️ REGRA PARA MÓDULO CARGILL:\n"
+            "Foque na empresa Cargill: Propósito, Valores, EHS (Regras de Ouro de Segurança), Parada de Segurança (Stop Work Authority), Originação e Logística de Commodities.\n"
+        )
+
     system_prompt = (
         "Você é um professor universitário e tutor acadêmico especialista em memorização ativa e flashcards do Anki.\n"
         "Sua função é transformar materiais de aula em flashcards didáticos com excelente formatação visual HTML.\n"
+        f"{context_instruction}\n"
         "REGRAS DE FORMATAÇÃO DIDÁTICA PARA O CAMPO 'back':\n"
-        "1. Para trechos de código (Estrutura de Dados, algoritmos), envolva o código em:\n"
-        "   <pre style='background:#181825; color:#a6e3a1; padding:8px; border-radius:5px; font-family:Consolas,monospace;'><code>código aqui</code></pre>\n"
-        "2. Para fórmulas matemáticas, equações ou conceitos-chave (Cálculo, Estatística, Finanças), envolva em:\n"
+        "1. Para trechos técnicos ou tabelas, use formatação clara.\n"
+        "2. Para fórmulas matemáticas, equações ou conceitos-chave (Finanças, Estatística), envolva em:\n"
         "   <div style='background:#313244; color:#89b4fa; padding:8px; border-left:4px solid #89b4fa; margin:6px 0; border-radius:3px;'><b>Fórmula/Conceito:</b> resultado aqui</div>\n"
         "3. Use negrito <b>texto</b> para dar destaque às palavras mais importantes.\n"
         "Responda EXCLUSIVAMENTE em formato JSON (uma lista de objetos JSON)."
@@ -95,21 +116,21 @@ def generate_college_flashcards(subject: str, content: str, num_cards: int = 10)
 
     user_prompt = f"""
 Disciplina Universitária: "{subject}"
-Material da Aula:
+Material da Aula / Contexto:
 ---
 {truncated_content}
 ---
 
 INSTRUÇÕES:
-1. Gere aproximadamente {num_cards} flashcards no formato Pergunta / Resposta.
+1. Gere aproximadamente {num_cards} flashcards no formato Pergunta / Resposta respeitando RIGOROSAMENTE o escopo da disciplina "{subject}".
 2. Frente (campo "front"): Pergunta clara, problema prático ou desafio conceitual da matéria.
-3. Verso (campo "back"): Resposta direta com a explicação, aplicando a formatação HTML de código ou caixa de fórmula quando pertinente.
+3. Verso (campo "back"): Resposta direta com a explicação e destaques em <b>negrito</b>.
 
 Responda ESTRITAMENTE uma lista JSON válida (sem texto adicional):
 [
     {{
         "front": "Pergunta ou conceito da disciplina",
-        "back": "Resposta clara com <b>destaque</b> e blocos de código/fórmula se aplicável"
+        "back": "Resposta clara com <b>destaque</b>"
     }}
 ]
 """
