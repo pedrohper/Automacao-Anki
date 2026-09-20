@@ -10,7 +10,7 @@ from tkinter import filedialog, messagebox, scrolledtext, ttk
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from src.anki_client import add_note, check_connection, create_deck, get_deck_names
+from src.anki_client import add_note, check_connection, create_deck, get_deck_names, refresh_anki_gui
 from src.auto_router import auto_route_and_generate
 from src.college_service import extract_text_from_file
 from src.context_library import context_count, find_relevant_context, init_context_library, save_context
@@ -323,13 +323,15 @@ class AnkiAutomationGUI:
         threading.Thread(target=worker, daemon=True).start()
 
     def finish_send(self, created: int, failures: list[str], deck_name: str):
+        refresh_anki_gui()
         if failures:
             self.plan_status.config(text=f"{created} cards enviados; {len(failures)} falharam.", fg=self.YELLOW)
             self.send_button.config(state="disabled", text="Envio concluído com pendências")
             messagebox.showwarning("Envio parcial", "\n".join(failures[:2]))
         else:
             self.plan_status.config(text=f"{created} cards enviados para {deck_name}.", fg=self.GREEN)
-            self.send_button.config(state="disabled", text=f"{created} cards enviados ao Anki")
+            self.send_button.config(state="disabled", text=f"✅ {created} cards enviados ao Anki")
+            messagebox.showinfo("Cards Enviados!", f"✅ {created} flashcards foram criados e adicionados ao baralho '{deck_name}' no seu Anki Desktop com sucesso!\n\nVerifique a lista no seu Anki Desktop.")
 
     def show_history(self):
         window = tk.Toplevel(self.root)

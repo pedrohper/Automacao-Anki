@@ -148,6 +148,13 @@ def get_all_notes_from_deck(deck_name: str = ANKI_DECK_NAME, url: str = ANKI_CON
     info_res = invoke_anki("notesInfo", {"notes": note_ids}, url=url)
     return info_res.get("result", [])
 
+def refresh_anki_gui(url: str = ANKI_CONNECT_URL):
+    """Força o Anki Desktop a atualizar a tela e os contadores de cards visíveis imediatamente."""
+    try:
+        invoke_anki("guiDeckBrowser", url=url)
+    except Exception:
+        pass
+
 if __name__ == "__main__":
     if check_connection():
         print("[OK] Conexao com o AnkiConnect bem-sucedida!")
