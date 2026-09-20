@@ -76,6 +76,32 @@ class AnkiAutomationGUI:
         self.status_label = self._label(header, "Verificando Anki…", size=9, fg=self.YELLOW)
         self.status_label.pack(side="right", pady=(5, 0))
 
+        # Menu Três Pontinhos (Opções Avançadas do Anki)
+        self.menu_btn = tk.Menubutton(
+            header,
+            text=" ⋮ ",
+            font=("Segoe UI", 14, "bold"),
+            bg=self.BG,
+            fg=self.MUTED,
+            activebackground=self.BG,
+            activeforeground=self.TEXT,
+            bd=0,
+            cursor="hand2"
+        )
+        self.menu = tk.Menu(
+            self.menu_btn,
+            tearoff=0,
+            bg=self.SURFACE,
+            fg=self.TEXT,
+            activebackground="#45475a",
+            activeforeground=self.BLUE,
+            font=("Segoe UI", 9)
+        )
+        self.menu.add_command(label="🔄 Atualizar baralhos do Anki", command=self.refresh_connection)
+        self.menu.add_command(label="🏗️ Criar estrutura base de baralhos", command=self.create_study_structure)
+        self.menu_btn.config(menu=self.menu)
+        self.menu_btn.pack(side="right", padx=(8, 0))
+
         content = tk.Frame(self.root, bg=self.BG, padx=24)
         content.pack(fill="both", expand=True)
 
@@ -137,8 +163,6 @@ class AnkiAutomationGUI:
         self.deck_value = tk.StringVar()
         self.deck_picker = ttk.Combobox(destination, textvariable=self.deck_value, state="readonly", style="Deck.TCombobox", width=46)
         self.deck_picker.pack(side="left", padx=12, fill="x", expand=True)
-        self._button(destination, "Atualizar baralhos", self.refresh_connection, primary=True, font=("Segoe UI", 8, "bold"), padx=8, pady=4).pack(side="right")
-        self._button(destination, "Criar estrutura base", self.create_study_structure, font=("Segoe UI", 8, "bold"), padx=8, pady=4).pack(side="right", padx=(0, 6))
 
         self.preview = scrolledtext.ScrolledText(
             self.plan_card, height=11, wrap="word", font=("Segoe UI", 10), bg="#181825", fg=self.TEXT,
