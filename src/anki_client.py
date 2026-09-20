@@ -42,6 +42,30 @@ def get_deck_names(url: str = ANKI_CONNECT_URL) -> List[str]:
     res = invoke_anki("deckNames", url=url)
     return res.get("result", [])
 
+def get_model_names(url: str = ANKI_CONNECT_URL) -> List[str]:
+    """Retorna a lista de modelos de nota existentes no Anki."""
+    res = invoke_anki("modelNames", url=url)
+    return res.get("result", [])
+
+def resolve_best_model(requested_model: str = ANKI_MODEL_NAME, url: str = ANKI_CONNECT_URL) -> str:
+    """Resolve o melhor nome de modelo de nota compatível com a instalação do Anki (ex: 'Basic', 'Básico', etc.)."""
+    try:
+        available = get_model_names(url=url)
+        if requested_model in available:
+            return requested_model
+        if "Basic" in available:
+            return "Basic"
+        if "Básico" in available:
+            return "Básico"
+        for m in available:
+            if "básico" in m.lower() or "basic" in m.lower():
+                return m
+        if available:
+            return available[0]
+    except Exception:
+        pass
+    return requested_model
+
 def create_deck(deck_name: str, url: str = ANKI_CONNECT_URL) -> int:
     """Cria um novo baralho ou sub-baralho no Anki se ainda não existir."""
     res = invoke_anki("createDeck", {"deck": deck_name}, url=url)
@@ -84,10 +108,13 @@ def add_note(
     except Exception:
         pass
 
+    # Resolver modelo real disponível no Anki
+    target_model = resolve_best_model(model_name, url=url)
+
     # Descobrir campos do modelo para garantir compatibilidade
     fields = {}
     try:
-        model_fields = get_model_fields(model_name, url=url)
+        model_fields = get_model_fields(target_model, url=url)
         if len(model_fields) >= 2:
             fields[model_fields[0]] = front_content
             fields[model_fields[1]] = back_content
@@ -99,9 +126,12 @@ def add_note(
     note_params = {
         "note": {
             "deckName": deck_name,
-            "modelName": model_name,
+            "modelName": target_model,
             "fields": fields,
-            "tags": tags
+            "tags": tags,
+            "options": {
+                "allowDuplicate": True
+            }
         }
     }
 
@@ -120,7 +150,8 @@ def get_all_notes_from_deck(deck_name: str = ANKI_DECK_NAME, url: str = ANKI_CON
 
 if __name__ == "__main__":
     if check_connection():
-        print("✅ Conexão com o AnkiConnect bem-sucedida!")
-        print("Baralhos disponíveis:", get_deck_names())
+        print("[OK] Conexao com o AnkiConnect bem-sucedida!")
+        print("Baralhos disponiveis:", get_deck_names())
+        print("Modelos disponiveis:", get_model_names())
     else:
-        print("⚠️ Não foi possível conectar ao AnkiConnect.")
+        print("[AVISO] Nao foi possivel conectar ao AnkiConnect.")

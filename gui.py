@@ -1,907 +1,352 @@
-import sys
+"""Interface única para analisar materiais, revisar o plano e enviar ao Anki."""
+
+import html
 import os
-import io
 import re
-
-# Redirecionar sys.stdout e sys.stderr para evitar falhas ao rodar com pythonw (onde stdout é None)
-class DummyStream(io.StringIO):
-    def write(self, s):
-        pass
-    def flush(self):
-        pass
-
-if sys.stdout is None:
-    sys.stdout = DummyStream()
-if sys.stderr is None:
-    sys.stderr = DummyStream()
-
+import sys
 import threading
-import tempfile
 import tkinter as tk
-from tkinter import ttk, messagebox, scrolledtext, filedialog
+from tkinter import filedialog, messagebox, scrolledtext, ttk
 
-# Adicionar pasta raiz ao path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from src.database import init_db, get_known_words, get_recent_cards, is_word_known, record_card
-from src.anki_client import check_connection, add_note
-from src.extractor import extract_vocabulary_from_anki_deck
-from src.college_service import extract_text_from_file, generate_college_flashcards, DEFAULT_SUBJECTS
-from src.url_service import fetch_content_from_url
-from src.apkg_service import export_cards_to_apkg
-from src.utils import parse_word_list
-from src.preset_data import CARGILL_CARDS, ESAMC_CARDS, get_all_senai_cards_flat, SENAI_SUBJECTS_CARDS
+from src.anki_client import add_note, check_connection, create_deck, get_deck_names
 from src.auto_router import auto_route_and_generate
-from main import process_single_word
+from src.college_service import extract_text_from_file
+from src.context_library import context_count, find_relevant_context, init_context_library, save_context
+from src.database import get_recent_cards, init_db, record_card
+from src.deck_structure import missing_recommended_decks
 
-SENAI_DISCIPLINES = list(SENAI_SUBJECTS_CARDS.keys())
 
 class AnkiAutomationGUI:
-    def __init__(self, root):
+    """Uma única jornada: material -> plano de revisão -> conferência -> Anki."""
+
+    BG = "#11111b"
+    SURFACE = "#1e1e2e"
+    CARD = "#313244"
+    TEXT = "#cdd6f4"
+    MUTED = "#a6adc8"
+    BLUE = "#89b4fa"
+    GREEN = "#a6e3a1"
+    YELLOW = "#f9e2af"
+
+    def __init__(self, root: tk.Tk):
         self.root = root
-        self.root.title("🎴 Automação de Flashcards Anki (5 Seções Principais)")
-        self.root.geometry("820x740")
-        self.root.resizable(False, False)
-
-        # Tema Dark Mode Moderno
-        self.bg_color = "#1e1e2e"
-        self.card_bg = "#2b2b3d"
-        self.text_color = "#cdd6f4"
-        self.accent_color = "#89b4fa"
-        self.btn_bg = "#a6e3a1"
-        self.btn_fg = "#11111b"
-
-        self.root.configure(bg=self.bg_color)
-
-        # Estilos do Notebook e Treeview
-        style = ttk.Style()
-        style.theme_use('default')
-        style.configure('TNotebook', background=self.bg_color, borderwidth=0)
-        style.configure('TNotebook.Tab', background='#313244', foreground='#cdd6f4', padding=[10, 6], font=('Segoe UI', 9, 'bold'))
-        style.map('TNotebook.Tab', background=[('selected', '#45475a')], foreground=[('selected', '#89b4fa')])
-
-        style.configure("Treeview", background="#181825", foreground="#cdd6f4", fieldbackground="#181825", rowheight=24, font=('Segoe UI', 9))
-        style.configure("Treeview.Heading", background="#313244", foreground="#89b4fa", font=('Segoe UI', 9, 'bold'))
-
+        self.root.title("Anki Studio — revisão com contexto")
+        self.root.geometry("1020x790")
+        self.root.minsize(900, 680)
+        self.root.configure(bg=self.BG)
+        self.attached_file = ""
+        self.available_decks: list[str] = []
+        self.plan: dict = {}
+        self._configure_style()
         init_db()
-        self.attached_files = {"senai": "", "esamc": "", "cargill": "", "geral": ""}
-        self.setup_ui()
-        self.update_status()
+        init_context_library()
+        self._build_ui()
+        self.refresh_connection()
 
-    def setup_ui(self):
-        # Título Principal
-        title_label = tk.Label(
-            self.root,
-            text="🎴 Automação de Flashcards Anki",
-            font=("Segoe UI", 16, "bold"),
-            bg=self.bg_color,
-            fg=self.accent_color
+    def _configure_style(self):
+        style = ttk.Style()
+        style.theme_use("default")
+        style.configure("Deck.TCombobox", fieldbackground="#181825", background="#45475a", foreground=self.TEXT)
+        style.map("Deck.TCombobox", fieldbackground=[("readonly", "#181825")], foreground=[("readonly", self.TEXT)])
+        style.configure("History.Treeview", background="#181825", foreground=self.TEXT, fieldbackground="#181825", rowheight=26)
+        style.configure("History.Treeview.Heading", background="#45475a", foreground=self.TEXT, font=("Segoe UI", 9, "bold"))
+
+    def _label(self, parent, text, size=10, bold=False, fg=None, **kwargs):
+        return tk.Label(parent, text=text, font=("Segoe UI", size, "bold" if bold else "normal"), bg=parent.cget("bg"), fg=fg or self.TEXT, **kwargs)
+
+    def _button(self, parent, text, command, primary=False, **kwargs):
+        font = kwargs.pop("font", ("Segoe UI", 10, "bold"))
+        padx = kwargs.pop("padx", 14)
+        pady = kwargs.pop("pady", 8)
+        return tk.Button(
+            parent, text=text, command=command, cursor="hand2", bd=0,
+            font=font, padx=padx, pady=pady,
+            bg=self.GREEN if primary else "#45475a", fg="#11111b" if primary else self.TEXT,
+            activebackground="#94e2d5" if primary else "#585b70", activeforeground="#11111b" if primary else self.TEXT,
+            **kwargs,
         )
-        title_label.pack(pady=(8, 2))
 
-        # Sistema de Abas (Geral Primeiro + Demais Seções + Histórico)
-        self.notebook = ttk.Notebook(self.root)
-        self.notebook.pack(fill="both", expand=False, padx=10, pady=(5, 5))
+    def _build_ui(self):
+        header = tk.Frame(self.root, bg=self.BG, padx=24, pady=16)
+        header.pack(fill="x")
+        self._label(header, "ANKI STUDIO", size=18, bold=True, fg=self.BLUE).pack(side="left")
+        self._label(header, "Material → contexto → revisão → Anki", size=10, fg=self.MUTED).pack(side="left", padx=14, pady=(5, 0))
+        self.status_label = self._label(header, "Verificando Anki…", size=9, fg=self.YELLOW)
+        self.status_label.pack(side="right", pady=(5, 0))
 
-        # Seção 1: Geral (Auto-Direcionamento em Primeiro Lugar)
-        self.tab_geral = tk.Frame(self.notebook, bg=self.card_bg, padx=12, pady=10)
-        self.notebook.add(self.tab_geral, text="⚡ Geral (Auto-Deck)")
-        self.setup_geral_tab()
+        content = tk.Frame(self.root, bg=self.BG, padx=24)
+        content.pack(fill="both", expand=True)
 
-        # Seção 2: Inglês
-        self.tab_english = tk.Frame(self.notebook, bg=self.card_bg, padx=12, pady=10)
-        self.notebook.add(self.tab_english, text="🔤 Inglês")
-        self.setup_english_tab()
+        input_card = tk.Frame(content, bg=self.SURFACE, padx=16, pady=14)
+        input_card.pack(fill="x")
+        self._label(input_card, "O que você quer aprender ou revisar?", size=12, bold=True).pack(anchor="w")
+        self._label(
+            input_card,
+            "Cole suas anotações, uma transcrição, um resumo ou uma lista de termos. A IA lê o contexto e escolhe o baralho mais específico disponível.",
+            size=9, fg=self.MUTED, wraplength=900, justify="left",
+        ).pack(anchor="w", pady=(3, 10))
 
-        # Seção 3: SENAI
-        self.tab_senai = tk.Frame(self.notebook, bg=self.card_bg, padx=12, pady=10)
-        self.notebook.add(self.tab_senai, text="🏭 SENAI")
-        self.setup_senai_tab()
+        tools = tk.Frame(input_card, bg=self.SURFACE)
+        tools.pack(fill="x", pady=(0, 6))
+        self._button(tools, "Anexar PDF, TXT ou MD", self.attach_file, font=("Segoe UI", 9, "bold"), padx=10, pady=5).pack(side="left")
+        self.file_label = self._label(tools, "Nenhum arquivo anexado", size=9, fg=self.MUTED)
+        self.file_label.pack(side="left", padx=10)
+        self.save_context_var = tk.BooleanVar(value=True)
+        tk.Checkbutton(
+            tools, text="Guardar na biblioteca de contexto", variable=self.save_context_var,
+            bg=self.SURFACE, fg=self.MUTED, selectcolor="#181825", activebackground=self.SURFACE,
+            activeforeground=self.TEXT, font=("Segoe UI", 9),
+        ).pack(side="right", padx=10)
+        self._button(tools, "Limpar", self.clear_material, font=("Segoe UI", 9, "bold"), padx=10, pady=5).pack(side="right")
 
-        # Seção 4: ESAMC
-        self.tab_esamc = tk.Frame(self.notebook, bg=self.card_bg, padx=12, pady=10)
-        self.notebook.add(self.tab_esamc, text="🎓 ESAMC (Sistemas)")
-        self.setup_esamc_tab()
-
-        # Seção 5: Cargill
-        self.tab_cargill = tk.Frame(self.notebook, bg=self.card_bg, padx=12, pady=10)
-        self.notebook.add(self.tab_cargill, text="🏢 Cargill")
-        self.setup_cargill_tab()
-
-        # Seção Extra: Histórico
-        self.tab_history = tk.Frame(self.notebook, bg=self.card_bg, padx=10, pady=10)
-        self.notebook.add(self.tab_history, text="📜 Histórico")
-        self.setup_history_tab()
-
-
-        # Log e Progresso Compartilhado
-        log_frame = tk.Frame(self.root, bg=self.bg_color)
-        log_frame.pack(fill="both", expand=True, padx=10, pady=(5, 8))
-
-        log_label = tk.Label(
-            log_frame,
-            text="Progresso em Tempo Real:",
-            font=("Segoe UI", 9, "bold"),
-            bg=self.bg_color,
-            fg=self.text_color
+        self.material = scrolledtext.ScrolledText(
+            input_card, height=9, wrap="word", font=("Segoe UI", 10), bg="#181825", fg=self.TEXT,
+            insertbackground=self.TEXT, relief="flat", padx=10, pady=10,
         )
-        log_label.pack(anchor="w", pady=(0, 2))
+        self.material.pack(fill="x")
 
-        self.log_area = scrolledtext.ScrolledText(
-            log_frame,
-            font=("Consolas", 9),
-            bg="#11111b",
-            fg="#a6e3a1",
-            height=6,
-            bd=0
+        action_row = tk.Frame(input_card, bg=self.SURFACE, pady=12)
+        action_row.pack(fill="x")
+        self._label(
+            action_row,
+            "A IA define a quantidade necessária para cobrir o material.",
+            size=9,
+            fg=self.MUTED,
+        ).pack(side="left")
+        self.analyze_button = self._button(action_row, "Analisar e montar revisão", self.analyze_material, primary=True)
+        self.analyze_button.pack(side="right")
+
+        self.plan_card = tk.Frame(content, bg=self.SURFACE, padx=16, pady=14)
+        self.plan_card.pack(fill="both", expand=True, pady=(14, 0))
+        plan_head = tk.Frame(self.plan_card, bg=self.SURFACE)
+        plan_head.pack(fill="x")
+        self._label(plan_head, "Plano de revisão", size=12, bold=True).pack(side="left")
+        self.history_button = self._button(plan_head, "Histórico", self.show_history, font=("Segoe UI", 9, "bold"), padx=10, pady=5)
+        self.history_button.pack(side="right")
+        self.plan_status = self._label(plan_head, "Envie um material para começar.", size=9, fg=self.MUTED)
+        self.plan_status.pack(side="right", padx=12)
+
+        self.summary = self._label(self.plan_card, "", size=10, fg=self.TEXT, justify="left", anchor="w", wraplength=900)
+        self.summary.pack(fill="x", pady=(8, 6))
+
+        destination = tk.Frame(self.plan_card, bg=self.CARD, padx=10, pady=8)
+        destination.pack(fill="x", pady=(0, 8))
+        self._label(destination, "Destino no Anki", size=9, bold=True, fg=self.BLUE).pack(side="left")
+        self.deck_value = tk.StringVar()
+        self.deck_picker = ttk.Combobox(destination, textvariable=self.deck_value, state="readonly", style="Deck.TCombobox", width=46)
+        self.deck_picker.pack(side="left", padx=12, fill="x", expand=True)
+        self._button(destination, "Atualizar baralhos", self.refresh_connection, primary=True, font=("Segoe UI", 8, "bold"), padx=8, pady=4).pack(side="right")
+        self._button(destination, "Criar estrutura base", self.create_study_structure, font=("Segoe UI", 8, "bold"), padx=8, pady=4).pack(side="right", padx=(0, 6))
+
+        self.preview = scrolledtext.ScrolledText(
+            self.plan_card, height=11, wrap="word", font=("Segoe UI", 10), bg="#181825", fg=self.TEXT,
+            state="disabled", relief="flat", padx=10, pady=10,
         )
-        self.log_area.pack(fill="both", expand=True)
+        self.preview.pack(fill="both", expand=True)
 
-    # ---------------------------------------------------------
-    # SEÇÃO 1: INGLÊS
-    # ---------------------------------------------------------
-    def setup_english_tab(self):
-        lbl = tk.Label(
-            self.tab_english,
-            text="Cole sua lista de palavras em inglês (uma por linha, vírgulas ou espaços):",
-            font=("Segoe UI", 9, "bold"),
-            bg=self.card_bg,
-            fg=self.text_color
-        )
-        lbl.pack(anchor="w", pady=(0, 3))
+        send_row = tk.Frame(self.plan_card, bg=self.SURFACE)
+        send_row.pack(fill="x", pady=(10, 0))
+        self.send_button = self._button(send_row, "Enviar cards aprovados ao Anki", self.send_to_anki, primary=True, state="disabled")
+        self.send_button.pack(side="right")
+        self._label(send_row, "Você pode trocar o destino acima antes de enviar.", size=9, fg=self.MUTED).pack(side="right", padx=12, pady=10)
 
-        self.txt_words = scrolledtext.ScrolledText(
-            self.tab_english,
-            font=("Consolas", 10),
-            bg="#181825",
-            fg="#cdd6f4",
-            insertbackground="#cdd6f4",
-            height=6,
-            bd=1,
-            relief="solid"
-        )
-        self.txt_words.pack(fill="x", pady=(0, 6))
+    def _ui(self, callback, *args):
+        self.root.after(0, lambda: callback(*args))
 
-        opt_frame = tk.Frame(self.tab_english, bg=self.card_bg)
-        opt_frame.pack(fill="x", pady=(0, 6))
+    def _set_preview(self, text: str):
+        self.preview.config(state="normal")
+        self.preview.delete("1.0", tk.END)
+        self.preview.insert("1.0", text)
+        self.preview.config(state="disabled")
 
-        self.var_multi_meaning = tk.BooleanVar(value=True)
-        chk_multi = tk.Checkbutton(
-            opt_frame,
-            text="✨ Detectar Múltiplos Significados (gerar 1 card por sentido)",
-            variable=self.var_multi_meaning,
-            font=("Segoe UI", 9),
-            bg=self.card_bg,
-            fg=self.text_color,
-            selectcolor="#181825"
-        )
-        chk_multi.pack(anchor="w")
-
-        self.var_check_dup = tk.BooleanVar(value=True)
-        chk_dup = tk.Checkbutton(
-            opt_frame,
-            text="🔍 Avisar se a palavra já constar no banco de vocabulário",
-            variable=self.var_check_dup,
-            font=("Segoe UI", 9),
-            bg=self.card_bg,
-            fg=self.text_color,
-            selectcolor="#181825"
-        )
-        chk_dup.pack(anchor="w")
-
-        btn_row = tk.Frame(self.tab_english, bg=self.card_bg)
-        btn_row.pack(fill="x", pady=(0, 6))
-
-        self.btn_generate_eng = tk.Button(
-            btn_row,
-            text="🚀 Criar e Enviar para o Anki (Baralho Inglês)",
-            font=("Segoe UI", 10, "bold"),
-            bg=self.btn_bg,
-            fg=self.btn_fg,
-            bd=0,
-            cursor="hand2",
-            command=self.on_click_generate_english
-        )
-        self.btn_generate_eng.pack(side="left", fill="x", expand=True, ipady=5, padx=(0, 5))
-
-        btn_export_eng = tk.Button(
-            btn_row,
-            text="📦 Exportar .apkg",
-            font=("Segoe UI", 9, "bold"),
-            bg="#f9e2af",
-            fg="#11111b",
-            bd=0,
-            cursor="hand2",
-            command=lambda: self.export_apkg_action("Inglês")
-        )
-        btn_export_eng.pack(side="right", ipady=5, ipadx=8)
-
-        sub_frame = tk.Frame(self.tab_english, bg=self.card_bg)
-        sub_frame.pack(fill="x")
-
-        self.lbl_known = tk.Label(
-            sub_frame,
-            text="Vocabulário Conhecido: ...",
-            font=("Segoe UI", 9, "italic"),
-            bg=self.card_bg,
-            fg="#a6adc8"
-        )
-        self.lbl_known.pack(side="left")
-
-        btn_sync = tk.Button(
-            sub_frame,
-            text="🔄 Sincronizar Vocabulário do Anki",
-            font=("Segoe UI", 8),
-            bg="#45475a",
-            fg="#cdd6f4",
-            bd=0,
-            cursor="hand2",
-            command=self.on_click_sync
-        )
-        btn_sync.pack(side="right")
-
-    # ---------------------------------------------------------
-    # SEÇÃO 2: SENAI
-    # ---------------------------------------------------------
-    def setup_senai_tab(self):
-        row_preset = tk.Frame(self.tab_senai, bg="#181825", padx=8, pady=6)
-        row_preset.pack(fill="x", pady=(0, 8))
-
-        lbl_p = tk.Label(row_preset, text="⚡ Baralho Completo SENAI:", font=("Segoe UI", 9, "bold"), bg="#181825", fg="#89b4fa")
-        lbl_p.pack(side="left")
-
-        btn_send_senai_preset = tk.Button(
-            row_preset,
-            text="🚀 Enviar 31 Flashcards de Revisão para o Anki",
-            font=("Segoe UI", 8, "bold"),
-            bg="#a6e3a1",
-            fg="#11111b",
-            bd=0,
-            cursor="hand2",
-            command=lambda: self.send_preset_to_anki("SENAI")
-        )
-        btn_send_senai_preset.pack(side="left", padx=8)
-
-        btn_exp_senai = tk.Button(
-            row_preset,
-            text="📦 Baixar .apkg SENAI",
-            font=("Segoe UI", 8, "bold"),
-            bg="#f9e2af",
-            fg="#11111b",
-            bd=0,
-            cursor="hand2",
-            command=lambda: self.export_preset_apkg("SENAI")
-        )
-        btn_exp_senai.pack(side="right")
-
-        row1 = tk.Frame(self.tab_senai, bg=self.card_bg)
-        row1.pack(fill="x", pady=(0, 4))
-
-        lbl_subj = tk.Label(row1, text="Disciplina SENAI:", font=("Segoe UI", 9, "bold"), bg=self.card_bg, fg=self.text_color)
-        lbl_subj.pack(anchor="w")
-
-        self.combo_senai = ttk.Combobox(self.tab_senai, values=SENAI_DISCIPLINES, font=("Segoe UI", 9), state="normal")
-        self.combo_senai.set(SENAI_DISCIPLINES[0])
-        self.combo_senai.pack(fill="x", pady=(0, 6))
-
-        # Anexar / URL
-        row_files = tk.Frame(self.tab_senai, bg=self.card_bg)
-        row_files.pack(fill="x", pady=(0, 4))
-
-        btn_attach = tk.Button(
-            row_files,
-            text="📁 Anexar PDF / Slide / TXT",
-            font=("Segoe UI", 8, "bold"),
-            bg="#89b4fa",
-            fg="#11111b",
-            bd=0,
-            cursor="hand2",
-            command=lambda: self.on_click_attach_file("senai")
-        )
-        btn_attach.pack(side="left")
-
-        self.lbl_file_senai = tk.Label(row_files, text="Nenhum arquivo", font=("Segoe UI", 8, "italic"), bg=self.card_bg, fg="#a6adc8")
-        self.lbl_file_senai.pack(side="left", padx=6)
-
-        lbl_text = tk.Label(self.tab_senai, text="Ou cole o resumo / texto da aula:", font=("Segoe UI", 9, "bold"), bg=self.card_bg, fg=self.text_color)
-        lbl_text.pack(anchor="w", pady=(4, 2))
-
-        self.txt_senai = scrolledtext.ScrolledText(self.tab_senai, font=("Consolas", 9), bg="#181825", fg="#cdd6f4", height=4, bd=1, relief="solid")
-        self.txt_senai.pack(fill="x", pady=(0, 6))
-
-        btn_gen_senai = tk.Button(
-            self.tab_senai,
-            text="⚡ Gerar Flashcards da Aula (SENAI) via IA",
-            font=("Segoe UI", 9, "bold"),
-            bg=self.btn_bg,
-            fg=self.btn_fg,
-            bd=0,
-            cursor="hand2",
-            command=lambda: self.on_click_generate_custom("SENAI", self.combo_senai.get(), self.txt_senai, "senai")
-        )
-        btn_gen_senai.pack(fill="x", ipady=5)
-
-    # ---------------------------------------------------------
-    # SEÇÃO 3: ESAMC
-    # ---------------------------------------------------------
-    def setup_esamc_tab(self):
-        row_preset = tk.Frame(self.tab_esamc, bg="#181825", padx=8, pady=6)
-        row_preset.pack(fill="x", pady=(0, 8))
-
-        lbl_p = tk.Label(row_preset, text="⚡ Baralho Completo ESAMC (Sistemas):", font=("Segoe UI", 9, "bold"), bg="#181825", fg="#89b4fa")
-        lbl_p.pack(side="left")
-
-        btn_send_esamc_preset = tk.Button(
-            row_preset,
-            text="🚀 Enviar Flashcards de ERP/TI para o Anki",
-            font=("Segoe UI", 8, "bold"),
-            bg="#a6e3a1",
-            fg="#11111b",
-            bd=0,
-            cursor="hand2",
-            command=lambda: self.send_preset_to_anki("ESAMC")
-        )
-        btn_send_esamc_preset.pack(side="left", padx=8)
-
-        btn_exp_esamc = tk.Button(
-            row_preset,
-            text="📦 Baixar .apkg ESAMC",
-            font=("Segoe UI", 8, "bold"),
-            bg="#f9e2af",
-            fg="#11111b",
-            bd=0,
-            cursor="hand2",
-            command=lambda: self.export_preset_apkg("ESAMC")
-        )
-        btn_exp_esamc.pack(side="right")
-
-        lbl_t = tk.Label(self.tab_esamc, text="Eixo da Faculdade (ESAMC):", font=("Segoe UI", 9, "bold"), bg=self.card_bg, fg=self.accent_color)
-        lbl_t.pack(anchor="w", pady=(0, 2))
-
-        self.combo_esamc_axis = ttk.Combobox(
-            self.tab_esamc,
-            values=[
-                "Eixo TI & Programação (CC / SI / Software)",
-                "Eixo Gestão & Negócios (ADM / ERP / BI)"
-            ],
-            font=("Segoe UI", 9),
-            state="readonly"
-        )
-        self.combo_esamc_axis.set("Eixo TI & Programação (CC / SI / Software)")
-        self.combo_esamc_axis.pack(fill="x", pady=(0, 6))
-
-        row_files = tk.Frame(self.tab_esamc, bg=self.card_bg)
-        row_files.pack(fill="x", pady=(0, 4))
-
-        btn_attach = tk.Button(
-            row_files,
-            text="📁 Anexar PDF / Slide / Resumo",
-            font=("Segoe UI", 8, "bold"),
-            bg="#89b4fa",
-            fg="#11111b",
-            bd=0,
-            cursor="hand2",
-            command=lambda: self.on_click_attach_file("esamc")
-        )
-        btn_attach.pack(side="left")
-
-        self.lbl_file_esamc = tk.Label(row_files, text="Nenhum arquivo", font=("Segoe UI", 8, "italic"), bg=self.card_bg, fg="#a6adc8")
-        self.lbl_file_esamc.pack(side="left", padx=6)
-
-        lbl_text = tk.Label(self.tab_esamc, text="Cole o resumo ou notas da aula ESAMC:", font=("Segoe UI", 9, "bold"), bg=self.card_bg, fg=self.text_color)
-        lbl_text.pack(anchor="w", pady=(4, 2))
-
-        self.txt_esamc = scrolledtext.ScrolledText(self.tab_esamc, font=("Consolas", 9), bg="#181825", fg="#cdd6f4", height=4, bd=1, relief="solid")
-        self.txt_esamc.pack(fill="x", pady=(0, 6))
-
-        btn_gen_esamc = tk.Button(
-            self.tab_esamc,
-            text="⚡ Gerar Flashcards da Aula (ESAMC) via IA",
-            font=("Segoe UI", 9, "bold"),
-            bg=self.btn_bg,
-            fg=self.btn_fg,
-            bd=0,
-            cursor="hand2",
-            command=lambda: self.on_click_generate_custom("ESAMC", self.combo_esamc_axis.get(), self.txt_esamc, "esamc")
-        )
-        btn_gen_esamc.pack(fill="x", ipady=5)
-
-    # ---------------------------------------------------------
-    # SEÇÃO 4: CARGILL
-    # ---------------------------------------------------------
-    def setup_cargill_tab(self):
-        row_preset = tk.Frame(self.tab_cargill, bg="#181825", padx=8, pady=6)
-        row_preset.pack(fill="x", pady=(0, 8))
-
-        lbl_p = tk.Label(row_preset, text="⚡ Baralho Completo Cargill:", font=("Segoe UI", 9, "bold"), bg="#181825", fg="#89b4fa")
-        lbl_p.pack(side="left")
-
-        btn_send_cargill_preset = tk.Button(
-            row_preset,
-            text="🚀 Enviar Flashcards (Empresa, EHS, Valores) para o Anki",
-            font=("Segoe UI", 8, "bold"),
-            bg="#a6e3a1",
-            fg="#11111b",
-            bd=0,
-            cursor="hand2",
-            command=lambda: self.send_preset_to_anki("Cargill")
-        )
-        btn_send_cargill_preset.pack(side="left", padx=8)
-
-        btn_exp_cargill = tk.Button(
-            row_preset,
-            text="📦 Baixar .apkg Cargill",
-            font=("Segoe UI", 8, "bold"),
-            bg="#f9e2af",
-            fg="#11111b",
-            bd=0,
-            cursor="hand2",
-            command=lambda: self.export_preset_apkg("Cargill")
-        )
-        btn_exp_cargill.pack(side="right")
-
-        lbl_t = tk.Label(self.tab_cargill, text="Cargill: Aprendizados, Treinamentos, EHS & Procedimentos", font=("Segoe UI", 9, "bold"), bg=self.card_bg, fg=self.accent_color)
-        lbl_t.pack(anchor="w", pady=(0, 4))
-
-        row_files = tk.Frame(self.tab_cargill, bg=self.card_bg)
-        row_files.pack(fill="x", pady=(0, 4))
-
-        btn_attach = tk.Button(
-            row_files,
-            text="📁 Anexar PDF / Procedimento / Documento",
-            font=("Segoe UI", 8, "bold"),
-            bg="#89b4fa",
-            fg="#11111b",
-            bd=0,
-            cursor="hand2",
-            command=lambda: self.on_click_attach_file("cargill")
-        )
-        btn_attach.pack(side="left")
-
-        self.lbl_file_cargill = tk.Label(row_files, text="Nenhum arquivo", font=("Segoe UI", 8, "italic"), bg=self.card_bg, fg="#a6adc8")
-        self.lbl_file_cargill.pack(side="left", padx=6)
-
-        lbl_text = tk.Label(self.tab_cargill, text="Cole seus aprendizados ou tópicos da Cargill:", font=("Segoe UI", 9, "bold"), bg=self.card_bg, fg=self.text_color)
-        lbl_text.pack(anchor="w", pady=(4, 2))
-
-        self.txt_cargill = scrolledtext.ScrolledText(self.tab_cargill, font=("Consolas", 9), bg="#181825", fg="#cdd6f4", height=5, bd=1, relief="solid")
-        self.txt_cargill.pack(fill="x", pady=(0, 6))
-
-        btn_gen_cargill = tk.Button(
-            self.tab_cargill,
-            text="⚡ Gerar Flashcards da Cargill via IA",
-            font=("Segoe UI", 9, "bold"),
-            bg=self.btn_bg,
-            fg=self.btn_fg,
-            bd=0,
-            cursor="hand2",
-            command=lambda: self.on_click_generate_custom("Cargill", "Cargill Operações & EHS", self.txt_cargill, "cargill")
-        )
-        btn_gen_cargill.pack(fill="x", ipady=5)
-
-    # ---------------------------------------------------------
-    # SEÇÃO 5: GERAL (AUTO-DIRECIONAMENTO)
-    # ---------------------------------------------------------
-    def setup_geral_tab(self):
-        lbl_desc = tk.Label(
-            self.tab_geral,
-            text="⚡ Cole qualquer texto rápido aqui! A IA identifica o assunto (SENAI, ESAMC, Cargill, Inglês ou Geral) e envia para o deck certo!",
-            font=("Segoe UI", 9, "bold"),
-            bg=self.card_bg,
-            fg="#89b4fa",
-            wraplength=760,
-            justify="left"
-        )
-        lbl_desc.pack(anchor="w", pady=(0, 6))
-
-        row_files = tk.Frame(self.tab_geral, bg=self.card_bg)
-        row_files.pack(fill="x", pady=(0, 4))
-
-        btn_attach = tk.Button(
-            row_files,
-            text="📁 Anexar Qualquer Arquivo (PDF / TXT)",
-            font=("Segoe UI", 8, "bold"),
-            bg="#89b4fa",
-            fg="#11111b",
-            bd=0,
-            cursor="hand2",
-            command=lambda: self.on_click_attach_file("geral")
-        )
-        btn_attach.pack(side="left")
-
-        self.lbl_file_geral = tk.Label(row_files, text="Nenhum arquivo", font=("Segoe UI", 8, "italic"), bg=self.card_bg, fg="#a6adc8")
-        self.lbl_file_geral.pack(side="left", padx=6)
-
-        self.txt_geral = scrolledtext.ScrolledText(self.tab_geral, font=("Consolas", 9), bg="#181825", fg="#cdd6f4", height=7, bd=1, relief="solid")
-        self.txt_geral.pack(fill="x", pady=(0, 8))
-
-        self.btn_gen_geral = tk.Button(
-            self.tab_geral,
-            text="🚀 Processar Texto e Auto-Direcionar para o Deck Correto no Anki",
-            font=("Segoe UI", 10, "bold"),
-            bg=self.btn_bg,
-            fg=self.btn_fg,
-            bd=0,
-            cursor="hand2",
-            command=self.on_click_auto_route_geral
-        )
-        self.btn_gen_geral.pack(fill="x", ipady=6)
-
-    # ---------------------------------------------------------
-    # SEÇÃO EXTRA: HISTÓRICO DE CARDS
-    # ---------------------------------------------------------
-    def setup_history_tab(self):
-        top_bar = tk.Frame(self.tab_history, bg=self.card_bg)
-        top_bar.pack(fill="x", pady=(0, 6))
-
-        lbl_hist = tk.Label(top_bar, text="Histórico de Cards Gerados no Banco:", font=("Segoe UI", 9, "bold"), bg=self.card_bg, fg=self.text_color)
-        lbl_hist.pack(side="left")
-
-        btn_refresh = tk.Button(
-            top_bar,
-            text="🔄 Atualizar Lista",
-            font=("Segoe UI", 8, "bold"),
-            bg="#45475a",
-            fg="#cdd6f4",
-            bd=0,
-            cursor="hand2",
-            command=self.load_history_data
-        )
-        btn_refresh.pack(side="right")
-
-        columns = ("id", "date", "word", "sentence", "meaning")
-        self.tree_history = ttk.Treeview(self.tab_history, columns=columns, show="headings", height=9)
-
-        self.tree_history.heading("id", text="ID")
-        self.tree_history.heading("date", text="Data/Hora")
-        self.tree_history.heading("word", text="Palavra / Matéria")
-        self.tree_history.heading("sentence", text="Frente")
-        self.tree_history.heading("meaning", text="Verso")
-
-        self.tree_history.column("id", width=35, anchor="center")
-        self.tree_history.column("date", width=110, anchor="center")
-        self.tree_history.column("word", width=130, anchor="w")
-        self.tree_history.column("sentence", width=220, anchor="w")
-        self.tree_history.column("meaning", width=200, anchor="w")
-
-        self.tree_history.pack(fill="both", expand=True)
-        self.load_history_data()
-
-    # ---------------------------------------------------------
-    # AÇÕES E LÓGICA DE NEGÓCIO
-    # ---------------------------------------------------------
-    def load_history_data(self):
-        for item in self.tree_history.get_children():
-            self.tree_history.delete(item)
-        
-        rows = get_recent_cards(limit=80)
-        for r in rows:
-            sentence_clean = re.sub(r'<[^>]+>', ' ', r[2])
-            meaning_clean = re.sub(r'<[^>]+>', ' ', r[3])
-            self.tree_history.insert("", "end", values=(r[0], r[4], r[1], sentence_clean[:40], meaning_clean[:35]))
-
-    def log(self, message: str):
-        self.log_area.insert(tk.END, message + "\n")
-        self.log_area.see(tk.END)
-
-    def update_status(self):
-        known = get_known_words()
-        self.lbl_known.config(text=f"Vocabulário Conhecido: {len(known)} palavras")
-        
+    def refresh_connection(self):
         if check_connection():
-            self.log("🟢 Conectado ao Anki Desktop via AnkiConnect.")
+            try:
+                self.available_decks = get_deck_names()
+                self.status_label.config(text=f"Anki conectado · {len(self.available_decks)} baralhos", fg=self.GREEN)
+                selected_deck = self.deck_value.get().strip()
+                self.deck_picker["values"] = self.available_decks
+                if selected_deck and selected_deck not in self.available_decks:
+                    self.deck_value.set("")
+                if self.plan:
+                    self.plan_status.config(text=f"Lista atualizada: {len(self.available_decks)} baralhos disponíveis.", fg=self.GREEN)
+            except Exception as error:
+                self.status_label.config(text=f"Falha ao ler baralhos: {error}", fg=self.YELLOW)
         else:
-            self.log("⚠️ Anki Desktop não detectado! Abra o Anki para enviar ou use a exportação de arquivos .apkg.")
+            self.available_decks = []
+            self.status_label.config(text="Abra o Anki Desktop com AnkiConnect", fg=self.YELLOW)
 
-    def validate_api_key(self) -> bool:
-        key = os.getenv("DEEPSEEK_API_KEY", "").strip()
-        if not key or key == "sua_chave_api_aqui":
-            messagebox.showwarning(
-                "Configuração Necessária",
-                "A chave da API do DeepSeek não foi configurada!\n\n"
-                "Edite o arquivo .env no diretório do projeto e insira sua chave:\n"
-                "DEEPSEEK_API_KEY=sk-sua-chave-real"
-            )
-            return False
-        return True
-
-    def on_click_attach_file(self, section_key: str):
-        file_path = filedialog.askopenfilename(
-            title="Selecionar Arquivo",
-            filetypes=[("Arquivos Suportados", "*.pdf;*.txt;*.md"), ("Arquivos PDF", "*.pdf"), ("Arquivos de Texto", "*.txt;*.md"), ("Todos os Arquivos", "*.*")]
-        )
-        if file_path:
-            self.attached_files[section_key] = file_path
-            filename = os.path.basename(file_path)
-            label_widget = getattr(self, f"lbl_file_{section_key}", None)
-            if label_widget:
-                label_widget.config(text=f"📎 Anexado: {filename}", fg="#a6e3a1")
-            self.log(f"📁 Arquivo anexado [{section_key.upper()}]: {file_path}")
-
-    def send_preset_to_anki(self, category: str):
+    def create_study_structure(self):
+        """Cria apenas os baralhos recomendados que ainda não existirem."""
         if not check_connection():
-            messagebox.showwarning("Anki Desconectado", "Abra o Anki Desktop para enviar diretamente ou use a opção de baixar o arquivo .apkg!")
+            messagebox.showwarning("Anki não conectado", "Abra o Anki Desktop com o AnkiConnect para criar a estrutura.")
             return
-
-        def worker():
-            if category == "SENAI":
-                cards = get_all_senai_cards_flat()
-                deck_name = "SENAI::Aprendizagem Administrativa Completo"
-                self.log(f"\n🚀 Enviando baralho completo '{deck_name}' ({len(cards)} cards) para o Anki...")
-                created = 0
-                for c in cards:
-                    try:
-                        add_note(front_content=c["front"], back_content=c["back"], deck_name=deck_name, tags=["SENAI", "Revisão"])
-                        record_card("SENAI", c["front"], c["back"])
-                        created += 1
-                    except Exception as e:
-                        self.log(f" ❌ Erro: {e}")
-                self.log(f"✅ {created} cards enviados para '{deck_name}'!")
-
-            elif category == "ESAMC":
-                from src.preset_data import ESAMC_TI_CARDS, ESAMC_ADM_CARDS
-                self.log("\n🚀 Enviando baralhos da ESAMC divididos por Eixos para o Anki...")
-                c_ti, c_adm = 0, 0
-                for c in ESAMC_TI_CARDS:
-                    try:
-                        add_note(front_content=c["front"], back_content=c["back"], deck_name="Eixo TI & Programação", tags=["ESAMC", "TI"])
-                        record_card("ESAMC_TI", c["front"], c["back"])
-                        c_ti += 1
-                    except Exception as e:
-                        self.log(f" ❌ Erro: {e}")
-                for c in ESAMC_ADM_CARDS:
-                    try:
-                        add_note(front_content=c["front"], back_content=c["back"], deck_name="Eixo Gestão & Negócios", tags=["ESAMC", "ADM"])
-                        record_card("ESAMC_ADM", c["front"], c["back"])
-                        c_adm += 1
-                    except Exception as e:
-                        self.log(f" ❌ Erro: {e}")
-                self.log(f"✅ Concluído! {c_ti} cards enviados para 'Eixo TI & Programação' e {c_adm} para 'Eixo Gestão & Negócios'!")
-
-            elif category == "Cargill":
-                cards = CARGILL_CARDS
-                deck_name = "Cargill::Geral e EHS"
-                self.log(f"\n🚀 Enviando baralho '{deck_name}' ({len(cards)} cards)...")
-                created = 0
-                for c in cards:
-                    try:
-                        add_note(front_content=c["front"], back_content=c["back"], deck_name=deck_name, tags=["Cargill", "EHS"])
-                        record_card("Cargill", c["front"], c["back"])
-                        created += 1
-                    except Exception as e:
-                        self.log(f" ❌ Erro: {e}")
-                self.log(f"✅ {created} cards enviados para '{deck_name}'!")
-
-            self.root.after(0, self.load_history_data)
-
-        threading.Thread(target=worker, daemon=True).start()
-
-    def export_preset_apkg(self, category: str):
-        data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
-        file_map = {
-            "SENAI": ("SENAI_Aprendizagem_Completo.apkg", "SENAI::Aprendizagem Completo", get_all_senai_cards_flat()),
-            "ESAMC": ("ESAMC_Sistemas_Informacao.apkg", "ESAMC::Sistemas de Informação", ESAMC_CARDS),
-            "Cargill": ("Cargill_Flashcards.apkg", "Cargill::Geral e EHS", CARGILL_CARDS)
-        }
-
-        if category not in file_map:
+        self.refresh_connection()
+        missing = missing_recommended_decks(self.available_decks)
+        if not missing:
+            messagebox.showinfo("Estrutura pronta", "Os baralhos recomendados já existem no Anki.")
             return
-
-        fname, deck_name, cards = file_map[category]
-        save_path = filedialog.asksaveasfilename(
-            title=f"Salvar Baralho .apkg ({category})",
-            defaultextension=".apkg",
-            filetypes=[("Baralho do Anki (*.apkg)", "*.apkg")],
-            initialfile=fname
-        )
-        if save_path:
-            try:
-                export_cards_to_apkg(deck_name, cards, output_path=save_path)
-                messagebox.showinfo("Sucesso", f"Baralho .apkg salvo em:\n{save_path}")
-                self.log(f"📦 Baralho .apkg salvo: {save_path}")
-            except Exception as e:
-                messagebox.showerror("Erro", f"Erro ao exportar .apkg: {e}")
-
-    # Geração Dinâmica via IA para seções específicas
-    def on_click_generate_custom(self, category: str, subject: str, text_widget: scrolledtext.ScrolledText, section_key: str):
-        if not self.validate_api_key():
-            return
-
-        text_content = text_widget.get("1.0", tk.END).strip()
-        attached_path = self.attached_files.get(section_key, "")
-
-        if attached_path:
-            try:
-                self.log(f"\n📖 Lendo arquivo anexado [{section_key.upper()}]...")
-                file_text = extract_text_from_file(attached_path)
-                text_content = file_text + "\n\n" + text_content
-            except Exception as e:
-                messagebox.showerror("Erro", f"Falha ao ler arquivo: {e}")
-                return
-
-        if not text_content.strip():
-            messagebox.showwarning("Aviso", "Anexe um arquivo (PDF/TXT) ou cole o resumo/texto da aula!")
-            return
-
-        if category == "ESAMC" or subject.startswith("Eixo "):
-            deck_name = subject
-        else:
-            deck_name = f"{category}::{subject}"
-
-        def worker():
-            try:
-                self.log(f"\n🧠 Gerando flashcards para '{deck_name}' via DeepSeek...")
-                cards = generate_college_flashcards(f"{category}: {subject}", text_content, num_cards=8)
-                self.log(f"💡 {len(cards)} cards gerados! Enviando ao Anki...")
-
-                created_count = 0
-                for c in cards:
-                    front = c.get("front", "")
-                    back = c.get("back", "")
-                    if front and back:
-                        add_note(
-                            front_content=front,
-                            back_content=back,
-                            deck_name=deck_name,
-                            tags=[category, subject, "Automação"]
-                        )
-                        record_card(category, front, back)
-                        created_count += 1
-                        self.log(f"  • Card: \"{front[:40]}...\"")
-
-                self.log(f"✅ {created_count} cards adicionados a '{deck_name}'!")
-            except Exception as e:
-                self.log(f"❌ Erro ao gerar cards: {e}")
-            finally:
-                self.root.after(0, self.load_history_data)
-
-        threading.Thread(target=worker, daemon=True).start()
-
-    # Roteamento Automático Seção Geral
-    def on_click_auto_route_geral(self):
-        if not self.validate_api_key():
-            return
-
-        text_content = self.txt_geral.get("1.0", tk.END).strip()
-        attached_path = self.attached_files.get("geral", "")
-
-        if attached_path:
-            try:
-                self.log(f"\n📖 Lendo arquivo anexado na seção Geral...")
-                file_text = extract_text_from_file(attached_path)
-                text_content = file_text + "\n\n" + text_content
-            except Exception as e:
-                messagebox.showerror("Erro", f"Falha ao ler arquivo: {e}")
-                return
-
-        if not text_content.strip():
-            messagebox.showwarning("Aviso", "Cole um resumo ou anexe um arquivo na seção Geral!")
-            return
-
-        self.btn_gen_geral.config(state="disabled", text="⏳ Analisando e Classificando via IA...")
-
-        def worker():
-            try:
-                self.log(f"\n⚡ Roteador Inteligente ativado: analisando o conteúdo...")
-                res = auto_route_and_generate(text_content, num_cards=8)
-
-                category = res.get("category", "Geral")
-                deck_name = res.get("deck_name", "Geral")
-                cards = res.get("cards", [])
-
-                self.log(f"🎯 Assunto Detectado: Categoria '{category}' -> Baralho Target: '{deck_name}'")
-                self.log(f"💡 {len(cards)} flashcards gerados! Enviando ao Anki...")
-
-                created_count = 0
-                for c in cards:
-                    front = c.get("front", "")
-                    back = c.get("back", "")
-                    if front and back:
-                        add_note(
-                            front_content=front,
-                            back_content=back,
-                            deck_name=deck_name,
-                            tags=[category, "AutoDeck", "Automação"]
-                        )
-                        record_card(category, front, back)
-                        created_count += 1
-                        self.log(f"  • Card: \"{front[:40]}...\"")
-
-                self.log(f"✅ Concluído! {created_count} cards direcionados para '{deck_name}'!")
-            except Exception as e:
-                self.log(f"❌ Erro no Roteador Inteligente: {e}")
-            finally:
-                self.root.after(0, self.finish_geral_route)
-
-        threading.Thread(target=worker, daemon=True).start()
-
-    def finish_geral_route(self):
-        self.btn_gen_geral.config(state="normal", text="🚀 Processar Texto e Auto-Direcionar para o Deck Correto no Anki")
-        self.txt_geral.delete("1.0", tk.END)
-        self.load_history_data()
-
-    # Lógica de Inglês
-    def on_click_generate_english(self):
-        if not self.validate_api_key():
-            return
-
-        raw_text = self.txt_words.get("1.0", tk.END).strip()
-        words = parse_word_list(raw_text)
-
-        if not words:
-            messagebox.showwarning("Aviso", "Cole pelo menos uma palavra em inglês!")
-            return
-
-        multi_sense = self.var_multi_meaning.get()
-        check_dup = self.var_check_dup.get()
-
-        self.btn_generate_eng.config(state="disabled", text="⏳ Gerando...")
-        self.txt_words.delete("1.0", tk.END)
-
-        def worker():
-            for word in words:
-                if check_dup and is_word_known(word):
-                    self.log(f"ℹ️ A palavra '{word}' já consta no seu banco de vocabulário.")
-
-                self.log(f"\n🔍 Processando palavra: '{word}'...")
-                try:
-                    success = process_single_word(word, multi_meaning=multi_sense)
-                    if success:
-                        self.log(f"✅ Cards da palavra '{word}' criados no Anki!")
-                    else:
-                        self.log(f"❌ Falha ao criar card para '{word}'.")
-                except Exception as e:
-                    self.log(f"❌ Erro: {e}")
-            
-            self.root.after(0, self.finish_english_generate)
-
-        threading.Thread(target=worker, daemon=True).start()
-
-    def finish_english_generate(self):
-        self.btn_generate_eng.config(state="normal", text="🚀 Criar e Enviar para o Anki (Baralho Inglês)")
-        self.update_status()
-        self.load_history_data()
-
-    def export_apkg_action(self, subject: str):
-        rows = get_recent_cards(limit=100)
-        if not rows:
-            messagebox.showwarning("Aviso", "Não há cards no histórico recente para exportar!")
-            return
-
-        save_path = filedialog.asksaveasfilename(
-            title="Salvar Baralho .apkg",
-            defaultextension=".apkg",
-            filetypes=[("Baralho do Anki (*.apkg)", "*.apkg")],
-            initialfile=f"{subject or 'Baralho_Anki'}.apkg"
-        )
-        if not save_path:
-            return
-
-        cards_list = [{"front": r[2], "back": r[3]} for r in rows]
-
         try:
-            export_cards_to_apkg(subject or "Inglês", cards_list, output_path=save_path)
-            messagebox.showinfo("Exportado!", f"Baralho .apkg salvo em:\n{save_path}")
-            self.log(f"📦 Baralho .apkg exportado para: {save_path}")
-        except Exception as e:
-            messagebox.showerror("Erro de Exportação", f"Erro: {e}")
+            for deck in missing:
+                create_deck(deck)
+            self.refresh_connection()
+            self.deck_picker["values"] = self.available_decks
+            self.plan_status.config(text=f"Estrutura criada: {len(missing)} novos baralhos.", fg=self.GREEN)
+        except Exception as error:
+            messagebox.showerror("Falha ao criar baralhos", str(error))
 
-    def on_click_sync(self):
+    def attach_file(self):
+        path = filedialog.askopenfilename(
+            title="Escolha o material de estudo",
+            filetypes=[("Materiais suportados", "*.pdf;*.txt;*.md"), ("Todos os arquivos", "*.*")],
+        )
+        if path:
+            self.attached_file = path
+            self.file_label.config(text=f"Anexado: {os.path.basename(path)}", fg=self.GREEN)
+
+    def clear_material(self):
+        self.attached_file = ""
+        self.file_label.config(text="Nenhum arquivo anexado", fg=self.MUTED)
+        self.material.delete("1.0", tk.END)
+
+    def _get_material(self) -> str:
+        text = self.material.get("1.0", tk.END).strip()
+        if self.attached_file:
+            text_from_file = extract_text_from_file(self.attached_file)
+            text = f"{text_from_file}\n\n--- Observações adicionadas pelo aluno ---\n{text}" if text else text_from_file
+        return text
+
+    def analyze_material(self):
+        if not check_connection():
+            messagebox.showwarning("Anki não conectado", "Abra o Anki Desktop com o AnkiConnect. Assim a IA escolhe entre os seus baralhos reais.")
+            return
+        try:
+            text = self._get_material()
+        except Exception as error:
+            messagebox.showerror("Não foi possível ler o arquivo", str(error))
+            return
+        if not text:
+            messagebox.showwarning("Material vazio", "Cole um texto ou anexe um PDF, TXT ou MD.")
+            return
+
+        self.refresh_connection()
+        self.analyze_button.config(state="disabled", text="Lendo contexto e organizando…")
+        self.plan_status.config(text="A IA está preparando a revisão…", fg=self.YELLOW)
+        self.send_button.config(state="disabled")
+        reference_context = find_relevant_context(text)
+        source_title = os.path.basename(self.attached_file) if self.attached_file else "Material colado"
+        should_save_context = self.save_context_var.get()
+
         def worker():
-            self.log("\n🔄 Sincronizando vocabulário do Anki...")
             try:
-                count = extract_vocabulary_from_anki_deck()
-                self.log(f"✅ Sincronização concluída! {count} novas palavras adicionadas.")
-            except Exception as e:
-                self.log(f"❌ Erro ao sincronizar: {e}")
-            self.root.after(0, self.update_status)
+                plan = auto_route_and_generate(
+                    text,
+                    self.available_decks,
+                    max_cards=40,
+                    reference_context=reference_context,
+                )
+                if should_save_context:
+                    save_context(source_title, text, "arquivo" if self.attached_file else "texto")
+                self._ui(self.show_plan, plan)
+            except Exception as error:
+                self._ui(self.show_analysis_error, str(error))
 
         threading.Thread(target=worker, daemon=True).start()
 
-def launch():
-    root = tk.Tk()
-    app = AnkiAutomationGUI(root)
-    root.mainloop()
+    def show_analysis_error(self, error: str):
+        self.analyze_button.config(state="normal", text="Analisar e montar revisão")
+        self.plan_status.config(text="Não foi possível montar o plano.", fg="#f38ba8")
+        messagebox.showerror("Erro na análise", error)
+
+    def show_plan(self, plan: dict):
+        self.plan = plan
+        self.analyze_button.config(state="normal", text="Analisar e montar revisão")
+        cards = plan.get("cards", [])
+        if not cards:
+            self.plan_status.config(text="O material não trouxe conteúdo suficiente para cards confiáveis.", fg=self.YELLOW)
+            self._set_preview("A IA preferiu não completar lacunas com suposições. Acrescente mais contexto ao material e tente de novo.")
+            return
+
+        suggested = plan.get("suggested_deck_name", "")
+        selected = plan.get("deck_name") or suggested
+        deck_values = list(self.available_decks)
+        if suggested and suggested not in deck_values:
+            deck_values.append(suggested)
+        self.deck_picker["values"] = deck_values
+        self.deck_value.set(selected if selected else "")
+
+        confidence = round(float(plan.get("confidence", 0)) * 100)
+        self.summary.config(
+            text=(f"{plan.get('subject', 'Assunto a revisar')} · nível {plan.get('level', 'não identificado')} · "
+                  f"confiança do roteamento: {confidence}%\n"
+                  f"{plan.get('routing_reason', '')}\n"
+                  f"Contexto de estudo: {plan.get('study_note', '')}\n"
+                  f"Cobertura: {plan.get('coverage_summary', '')}\n"
+                  f"Biblioteca local: {context_count()} material(is) salvos para dar contexto às próximas revisões.")
+        )
+        preview_lines = []
+        for index, card in enumerate(cards, 1):
+            front = re.sub(r"<[^>]+>", "", card["front"])
+            back = re.sub(r"<[^>]+>", "", html.unescape(card["back"]))
+            preview_lines.append(f"{index}. {front}\n   {back}\n")
+        self._set_preview("\n".join(preview_lines))
+        self.plan_status.config(text=f"{len(cards)} cards prontos para revisão.", fg=self.GREEN)
+        self.send_button.config(state="normal", text=f"Enviar {len(cards)} cards ao Anki")
+
+    def send_to_anki(self):
+        cards = self.plan.get("cards", [])
+        deck_name = self.deck_value.get().strip()
+        if not cards or not deck_name:
+            messagebox.showwarning("Plano incompleto", "Gere os cards e escolha um baralho antes de enviar.")
+            return
+        if not check_connection():
+            messagebox.showwarning("Anki desconectado", "Abra o Anki Desktop antes de enviar os cards.")
+            return
+
+        self.send_button.config(state="disabled", text="Enviando…")
+        self.plan_status.config(text=f"Enviando para {deck_name}…", fg=self.YELLOW)
+
+        def worker():
+            created, failures = 0, []
+            tags = ["Automação", "Revisão guiada", *self.plan.get("tags", [])]
+            for card in cards:
+                try:
+                    add_note(card["front"], card["back"], deck_name=deck_name, tags=tags)
+                    record_card(self.plan.get("subject", "Geral"), card["front"], card["back"])
+                    created += 1
+                except Exception as error:
+                    failures.append(str(error))
+            self._ui(self.finish_send, created, failures, deck_name)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def finish_send(self, created: int, failures: list[str], deck_name: str):
+        if failures:
+            self.plan_status.config(text=f"{created} cards enviados; {len(failures)} falharam.", fg=self.YELLOW)
+            self.send_button.config(state="disabled", text="Envio concluído com pendências")
+            messagebox.showwarning("Envio parcial", "\n".join(failures[:2]))
+        else:
+            self.plan_status.config(text=f"{created} cards enviados para {deck_name}.", fg=self.GREEN)
+            self.send_button.config(state="disabled", text=f"{created} cards enviados ao Anki")
+
+    def show_history(self):
+        window = tk.Toplevel(self.root)
+        window.title("Histórico de cards")
+        window.geometry("900x440")
+        window.configure(bg=self.SURFACE)
+        columns = ("data", "assunto", "frente", "verso")
+        tree = ttk.Treeview(window, columns=columns, show="headings", style="History.Treeview")
+        for column, title, width in [("data", "Data", 120), ("assunto", "Assunto", 150), ("frente", "Frente", 300), ("verso", "Verso", 300)]:
+            tree.heading(column, text=title)
+            tree.column(column, width=width, anchor="w")
+        for _, subject, front, back, created_at in get_recent_cards(100):
+            tree.insert("", "end", values=(created_at, subject, re.sub(r"<[^>]+>", "", front)[:120], re.sub(r"<[^>]+>", "", back)[:120]))
+        tree.pack(fill="both", expand=True, padx=14, pady=14)
+
 
 if __name__ == "__main__":
-    launch()
+    app_root = tk.Tk()
+    AnkiAutomationGUI(app_root)
+    app_root.mainloop()

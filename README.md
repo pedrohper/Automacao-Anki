@@ -1,12 +1,22 @@
-# 🎴 Automação de Flashcards para Anki (Inglês & Faculdade)
+# 🎴 Anki Studio — flashcards com contexto
 
-Aplicação desktop em Python com interface gráfica moderna para automação e geração inteligente de flashcards do **Anki** alimentada pela API do **DeepSeek**, com síntese de áudio nativa, suporte a múltiplos formatos de estudo e exportação direta em arquivos `.apkg`.
+Aplicação desktop em Python para transformar materiais de estudo em flashcards do **Anki**. A interface concentra o fluxo em uma única tela: material, análise pedagógica, escolha do baralho, prévia e envio.
+
+O roteador consulta os baralhos que já existem no Anki antes de chamar o modelo. Assim, o modelo só pode escolher um destino real; quando não houver um adequado, a interface mostra uma sugestão para você revisar antes do envio.
 
 ---
 
 ## ✨ Funcionalidades Principais
 
-### 🔤 1. Módulo de Inglês (Metodologia i+1)
+### 🧠 1. Revisão guiada por contexto
+- Lê PDFs, TXT, MD e texto colado.
+- Identifica assunto, nível, conceitos importantes e o baralho mais específico disponível no Anki.
+- Exibe a razão do roteamento, uma síntese didática e todos os cards antes do envio.
+- Produz cartões de recuperação ativa, com explicação e exemplo no verso quando o material permitir.
+- Guarda opcionalmente cada material em uma biblioteca local e recupera somente trechos relacionados nas próximas revisões.
+- Complementa uma coleção existente com `ESAMC::Exatas` e `Geral::Programação::Node.js`, sem recriar seus baralhos atuais.
+
+### 🔤 2. Vocabulário de inglês (Metodologia i+1)
 - **Método Comprehensible Input (i+1)**: Cria frases contextuais onde apenas a palavra-alvo é nova, utilizando o banco de palavras conhecidas do usuário.
 - **Áudio Nativo Automático**: Gera pronúncia em MP3 usando vozes neurais da biblioteca `edge-tts` e anexa diretamente ao card no Anki.
 - **Múltiplos Sentidos**: Opção para gerar 1 card por significado caso a palavra possua múltiplos usos comuns (ex: *run* = correr, administrar, rodar programa).
@@ -30,7 +40,7 @@ Aplicação desktop em Python com interface gráfica moderna para automação e 
 ## 📋 Pré-requisitos
 
 1. **Python 3.8+** instalado.
-2. **Chave de API da DeepSeek**: Cadastre-se na [Plataforma DeepSeek](https://platform.deepseek.com/) e obtenha uma chave de API.
+2. **Chave e endpoint de um modelo compatível com OpenAI**: configure `DEEPSEEK_API_KEY`, `DEEPSEEK_BASE_URL` e `DEEPSEEK_MODEL` no `.env`. Os nomes foram preservados por compatibilidade com o projeto; eles podem apontar para a configuração que você usa para o GPT-6.
 3. *(Opcional)* **Anki Desktop**: Se quiser sincronização direta, instale o add-on **AnkiConnect** no Anki:
    - No Anki Desktop, vá em `Ferramentas` -> `Notas/Extensões` -> `Obter extenções...`
    - Insira o código: `2055492159`
